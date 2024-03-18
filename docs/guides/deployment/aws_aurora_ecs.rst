@@ -858,6 +858,87 @@ link``:
 
 You can now open a REPL to this instance
 
+Install with AWS CDK v2 (TypeScript)
+=================================
+
+Additional Prerequisites
+-------------------------
+
+* Node.js (`install <nodejs-install_>`_)
+
+.. _nodejs-install: https://nodejs.org/en
+
+Create AWS CDK App
+------------
+
+.. code-block:: bash
+
+   mkdir edgedb-infra
+   npm install -g aws-cdk
+   cdk init app --language typescript
+
+Create VPC
+------------
+
+.. code-block:: typescript
+
+   const vpc = new ec2.Vpc(this, 'Vpc', {
+       vpcName: 'edgedb-vpc',
+       maxAzs: env !== 'production' ? 2 : undefined,
+       natGateways: useFckNat ? 1 : undefined,
+       natGatewayProvider: useFckNat
+           ? new ec2.NatInstanceProviderV2({
+                   instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.NANO),
+                   machineImage: new ec2.LookupMachineImage({
+                       name: 'fck-nat-amzn2-*-arm64-ebs',
+                       owners: ['568608671756']
+                   })
+               })
+           : undefined,
+       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'), 
+       subnetConfiguration: [
+           {
+               name: 'ingress',
+               subnetType: ec2.SubnetType.PUBLIC
+           },
+           {
+               name: 'edgedb',
+               subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+           },
+           {
+               name: 'aurora',
+               subnetType: ec2.SubnetType.PRIVATE_ISOLATED
+           }
+       ]
+   });
+
+.. note::
+
+   fck-nat offers a ready-to-use ARM and x86 based AMIs built on Amazon Linux 2023 
+   which can support up to 5Gbps burst NAT traffic on a t4g.nano instance. 
+
+   Sitting idle, fck-nat costs 10% of a Managed NAT Gateway.
+
+Create Security Groups
+------------
+
+.. code-block:: typescript
+
+   const edgedbSecurityGroup = new ec2.SecurityGroup(this, 'EdgeDBSecurityGroup', {
+      vpc,
+      securityGroupName: 'edgedb-sg',
+      description: `Security group to control access to EdgeDB`
+   });
+   edgedbSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(5656), 'Allow TCP 5656 for EdgeDB');
+   
+   const auroraSecurityGroup = new ec2.SecurityGroup(this, 'AuroraSecurityGroup', {
+      vpc,
+      securityGroupName: 'aurora-sg',
+      description: `Security group controlling access to Aurora PostgreSQL instance`
+   });
+   auroraSecurityGroup.addIngressRule(appSecurityGroup, ec2.Port.tcp(5432), 'Allow Aurora PostgreSQL access from EdgeDB');
+
+
 Health Checks
 =============
 
